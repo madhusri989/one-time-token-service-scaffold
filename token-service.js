@@ -1,8 +1,5 @@
 // token-service.js
 // A single-use, expiring token service backed by Redis.
-//
-// You implement the two functions below. The lesson walks through the exact
-// pattern — this file is just the shape to fill in.
 
 import crypto from "node:crypto";
 import Redis from "ioredis";
@@ -14,41 +11,44 @@ const redis = new Redis(process.env.REDIS_URL);
 const keyFor = (id) => "token:" + id;
 
 /**
- * Issue a single-use token that expires after `ttlSeconds`.
+ * Issue a single-use token that expires after ttlSeconds.
+ * The value and expiration are stored atomically.
  *
- * TODO:
- *   1. Generate a random id: crypto.randomBytes(16).toString("hex")  -> 32 hex chars
- *   2. JSON.stringify the payload.
- *   3. Store it under keyFor(id) with a TTL, in ONE atomic command:
- *        await redis.set(keyFor(id), value, "EX", ttlSeconds, "NX");
- *   4. Return the token id string.
- *
- * @param {object} payload      Any JSON-serialisable data (e.g. { userId: 42 }).
- * @param {number} ttlSeconds   Seconds until the token expires.
- * @returns {Promise<string>}   The token id to hand to the user.
+ * @param {object} payload
+ * @param {number} ttlSeconds
+ * @returns {Promise<string>}
  */
 export async function issueToken(payload, ttlSeconds) {
-  // TODO: implement
-  throw new Error("issueToken not implemented");
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+    throw new TypeError("ttlSeconds must be a positive integer");
+  }
+
+  const tokenId = crypto.randomBytes(16).toString("hex");
+  const value = JSON.stringify(payload);
+
+  // SET + EX applies the expiry in the same atomic Redis command.
+  const stored = await redis.set(keyFor(tokenId), value, "EX", ttlSeconds, "NX");
+  if (stored !== "OK") {
+    throw new Error("Could not issue token");
+  }
+
+  return tokenId;
 }
 
 /**
- * Consume a token exactly once.
- *
- * TODO:
- *   1. Read AND delete the token in ONE atomic command:
- *        const value = await redis.getdel(keyFor(tokenId));
- *   2. If value is null -> return { ok: false, reason: "invalid" }.
- *   3. Otherwise -> return { ok: true, payload: JSON.parse(value) }.
- *
- * Do NOT use GET then DEL as two separate commands — that races.
+ * Consume a token exactly once using Redis' atomic GETDEL command.
  *
  * @param {string} tokenId
- * @returns {Promise<{ ok: true, payload: object } | { ok: false, reason: string }>}
+ * @returns {Promise<{ ok: true, payload: object } | { ok: false, reason: "invalid" }>}
  */
 export async function consumeToken(tokenId) {
-  // TODO: implement
-  throw new Error("consumeToken not implemented");
+  const value = await redis.getdel(keyFor(tokenId));
+
+  if (value === null) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  return { ok: true, payload: JSON.parse(value) };
 }
 
 // Allow other files to close the connection cleanly (used by test.js).
